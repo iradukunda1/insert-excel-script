@@ -1,0 +1,25 @@
+# https://taskfile.dev
+
+version: '3'
+
+dotenv: [".env"] # use .env instead
+
+silent: true
+
+tasks:
+  default:
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+  build:
+    desc: For building importing execl citizens data
+    cmds:
+      - echo "> Building import execl script ..."
+      - go build -o bin/worker
+      - echo "> done"
+  run:
+    desc: For importing execl citizens data
+    cmds:
+      - echo "> Running import execl script ..."
+      - ./bin/worker
+      - echo "> done"
