@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // This will hold citizen information
@@ -34,70 +35,33 @@ func (db *DB) insertPersons(ctx context.Context, persons []*Person) ([]*Person, 
 	}
 	defer tx.Rollback()
 
-	for _, item := range persons {
-		err := tx.QueryRowContext(
-			ctx,
-			inserOwnerQuery,
-			uuid.New().String(),
-			item.FirstName,
-			item.SecondName,
-			item.Phone,
-		).Scan(&item.Id)
-		if err != nil {
-			pqErr, ok := err.(*pq.Error)
-			if ok {
-				switch pqErr.Code.Name() {
-				case "unique_violation":
-					tx.Rollback()
-					tx, err = db.BeginTx(ctx, nil)
-					if err != nil {
-						return nil, err
-					}
+	for _, person := range persons {
+		var id string
 
-					err := tx.QueryRowContext(
-						ctx,
-						selectOwnerQuery,
-						item.Phone,
-					).Scan(
-						&item.Id,
-						&item.FirstName,
-						&item.SecondName,
-						&item.Phone,
-					)
-					if err != nil {
-						return nil, err
-					}
-					continue
-				}
+		err = tx.QueryRowContext(ctx, "SELECT id FROM owners WHERE phone = $1", person.Phone).Scan(&id)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, err
+		}
+		if err == sql.ErrNoRows {
+			// Insert new row into owner table
+			id = uuid.New().String()
+			_, err = tx.ExecContext(
+				ctx,
+				inserOwnerQuery,
+				id,
+				person.FirstName,
+				person.SecondName,
+				person.Phone,
+			)
+			if err != nil {
+				return nil, err
 			}
-			return nil, err
 		}
-	}
-
-	// insert properties
-	for _, item := range persons {
-		amount, _ := strconv.ParseFloat(item.Amount, 64)
-		id := strings.Split(uuid.New().String(), "-")
-
-		_, err := tx.ExecContext(
-			ctx,
-			insertPropertyQuery,
-			strings.ToUpper(id[0]),
-			item.Id,
-			amount,
-			item.Sector,
-			item.Cell,
-			item.Village,
-			item.RecordedBy,
-			item.ForRent,
-			item.NameSpace,
-		)
-		if err != nil {
-			return nil, err
-		}
+		person.Id = id
 	}
 
 	return persons, tx.Commit()
+
 }
 
 // For inseting into persons into proterties
@@ -109,24 +73,40 @@ func (db *DB) insertPortperties(ctx context.Context, persons []*Person) ([]*Pers
 	}
 	defer tx.Rollback()
 
-	for _, item := range persons {
-		amount, _ := strconv.ParseFloat(item.Amount, 64)
-		_, err := tx.ExecContext(
-			ctx,
-			insertPropertyQuery,
-			uuid.New().String(),
-			item.Id,
-			amount,
-			item.Sector,
-			item.Cell,
-			item.Village,
-			item.RecordedBy,
-			item.ForRent,
-			item.NameSpace,
+	pos, args := []string{}, []interface{}{}
+
+	i := 0
+	for _, p := range persons {
+		amount, _ := strconv.ParseFloat(p.Amount, 64)
+		id := strings.Split(uuid.New().String(), "-")
+		pos = append(pos,
+			fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)", i*9+1, i*9+2, i*9+3, i*9+4, i*9+5, i*9+6, i*9+7, i*9+8, i*9+9),
 		)
-		if err != nil {
-			return nil, err
-		}
+		args = append(
+			args,
+			strings.ToUpper(id[0]),
+			p.Id,
+			amount,
+			p.Sector,
+			p.Cell,
+			p.Village,
+			p.RecordedBy,
+			p.ForRent,
+			p.NameSpace,
+		)
+		i++
+	}
+
+	var query = insertPropertyQuery + strings.Join(pos, ",")
+
+	_, err = tx.ExecContext(
+		ctx,
+		query,
+		args...,
+	)
+
+	if err != nil {
+		return nil, err
 	}
 
 	return persons, tx.Commit()
@@ -138,15 +118,6 @@ INSERT INTO owners
 VALUES 
 	($1, $2, $3, $4)
 RETURNING id
-`
-
-var selectOwnerQuery = `
-SELECT
-	id, fname, lname, phone
-FROM 
-	owners
-WHERE 
-	phone = $1
 `
 
 var insertPropertyQuery = `
@@ -162,5 +133,4 @@ INSERT INTO properties(
 		namespace
 	) 
 VALUES 
-	($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `

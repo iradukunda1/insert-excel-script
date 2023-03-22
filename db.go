@@ -49,7 +49,7 @@ func (db *DB) Open() (err error) {
 		return err
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 1; i < 10; i++ {
 		time.Sleep(5 * time.Millisecond)
 
 		if err == nil {
